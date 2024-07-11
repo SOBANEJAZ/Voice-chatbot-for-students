@@ -1,108 +1,169 @@
-# Set up the Whisper model
-import streamlit as st
-import pyaudio
-import wave
-import numpy as np
-import collections
-import faster_whisper
-import torch.cuda
 import os
-from openai import OpenAI
-from elevenlabs.client import ElevenLabs
-from elevenlabs import stream
-from dotenv import load_dotenv, find_dotenv
+from io import BytesIO
+import base64
+import httpx
 
-# Load environment variables
-dotenv_path = find_dotenv()
-load_dotenv(dotenv_path)
+from openai import AsyncOpenAI
 
-# Set up API clients
-openai_api = os.getenv("openai")
-elevenlabs_api = os.getenv("elevenlabs")
-os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-openai_client = OpenAI(api_key=openai_api)
-elevenlabs_client = ElevenLabs(api_key=elevenlabs_api)
+from chainlit.element import ElementBased
+import chainlit as cl
 
-# Set up the Whisper model
-model = faster_whisper.WhisperModel(
-    model_size_or_path="tiny", 
-    device='cuda' if torch.cuda.is_available() else 'cpu', compute_type='float32'
-)
+cl.instrument_openai()
 
-# System prompt
-system_prompt = {
-    'role': 'system',
-    'content': (
-        'You are Sophia. You are an exciting girl who loves to chat with people.'
+client = AsyncOpenAI()
+
+ELEVENLABS_API_KEY = os.environ.get("ELEVENLABS_API_KEY")
+ELEVENLABS_VOICE_ID = os.environ.get("ELEVENLABS_VOICE_ID")
+
+if not ELEVENLABS_API_KEY or not ELEVENLABS_VOICE_ID:
+    raise ValueError("ELEVENLABS_API_KEY and ELEVENLABS_VOICE_ID must be set")
+
+
+# Function to encode an image
+def encode_image(image_path):
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode("utf-8")
+
+
+@cl.step(type="tool")
+async def speech_to_text(audio_file):
+    response = await client.audio.transcriptions.create(
+        model="whisper-1", file=audio_file
     )
-}
 
-# Initialize history
-history = []
+    return response.text
 
-def generate(messages):
-    answer = ""        
-    for chunk in openai_client.chat.completions.create(model="gpt-3.5-turbo", messages=messages, stream=True):
-        if (text_chunk := chunk.choices[0].delta.content):
-            answer += text_chunk
-            yield text_chunk
-    return answer
 
-def get_levels(data, long_term_noise_level, current_noise_level):
-    pegel = np.abs(np.frombuffer(data, dtype=np.int16)).mean()
-    long_term_noise_level = long_term_noise_level * 0.995 + pegel * (1.0 - 0.995)
-    current_noise_level = current_noise_level * 0.920 + pegel * (1.0 - 0.920)
-    return pegel, long_term_noise_level, current_noise_level
+@cl.step(type="tool")
+async def generate_text_answer(transcription, images):
+    if images:
+        # Only process the first 3 images
+        images = images[:3]
 
-def record_audio():
-    audio = pyaudio.PyAudio()
-    py_stream = audio.open(rate=16000, format=pyaudio.paInt16, channels=1, input=True, frames_per_buffer=512)
-    audio_buffer = collections.deque(maxlen=int((16000 // 512) * 0.5))
-    frames, long_term_noise_level, current_noise_level, voice_activity_detected = [], 0.0, 0.0, False
+        images_content = [
+            {
+                "type": "image_url",
+                "image_url": {
+                    "url": f"data:{image.mime};base64,{encode_image(image.path)}"
+                },
+            }
+            for image in images
+        ]
 
-    st.write("Start speaking.")
-    while True:
-        data = py_stream.read(512)
-        pegel, long_term_noise_level, current_noise_level = get_levels(data, long_term_noise_level, current_noise_level)
-        audio_buffer.append(data)
+        model = "gpt-4-turbo"
+        messages = [
+            {
+                "role": "user",
+                "content": [{"type": "text", "text": transcription}, *images_content],
+            }
+        ]
+    else:
+        model = "gpt-3.5-turbo"
+        messages = [{"role": "user", "content": transcription}]
 
-        if voice_activity_detected:
-            frames.append(data)
-            if current_noise_level < ambient_noise_level + 100:
-                break  # voice activity ends
+    response = await client.chat.completions.create(
+        messages=messages, model=model, temperature=0.3
+    )
 
-        if not voice_activity_detected and current_noise_level > long_term_noise_level + 300:
-            voice_activity_detected = True
-            st.write("I'm all ears.")
-            ambient_noise_level = long_term_noise_level
-            frames.extend(list(audio_buffer))
+    return response.choices[0].message.content
 
-    py_stream.stop_stream()
-    py_stream.close()
-    audio.terminate()
 
-    # Save recording
-    with wave.open("voice_record.wav", 'wb') as wf:
-        wf.setparams((1, audio.get_sample_size(pyaudio.paInt16), 16000, 0, 'NONE', 'NONE'))
-        wf.writeframes(b''.join(frames))
+@cl.step(type="tool")
+async def text_to_speech(text: str, mime_type: str):
+    CHUNK_SIZE = 1024
 
-    return "voice_record.wav"
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{ELEVENLABS_VOICE_ID}"
 
-# Streamlit app
-st.title("Sophia Chatbot")
-st.write("Press the button and start speaking to interact with Sophia.")
+    headers = {
+    "Accept": mime_type,
+    "Content-Type": "application/json",
+    "xi-api-key": ELEVENLABS_API_KEY
+    }
 
-if st.button("Start Recording"):
-    audio_file = record_audio()
-    user_text = " ".join(seg.text for seg in model.transcribe(audio_file, language="en")[0])
-    st.write(f'You said: {user_text}')
-    history.append({'role': 'user', 'content': user_text})
+    data = {
+        "text": text,
+        "model_id": "eleven_monolingual_v1",
+        "voice_settings": {
+            "stability": 0.5,
+            "similarity_boost": 0.5
+        }
+    }
+    
+    async with httpx.AsyncClient(timeout=25.0) as client:
+        response = await client.post(url, json=data, headers=headers)
+        response.raise_for_status()  # Ensure we notice bad responses
 
-    # Generate and stream output
-    generator = generate([system_prompt] + history[-10:])
-    generated_text = "".join(list(generator))
-    history.append({'role': 'assistant', 'content': generated_text})
-    st.write(f'Sophia says: {generated_text}')
+        buffer = BytesIO()
+        buffer.name = f"output_audio.{mime_type.split('/')[1]}"
 
-    # Stream the response using ElevenLabs
-    stream(elevenlabs_client.generate(text=generated_text, voice="Nicole", model="eleven_multilingual_v2", stream=True))
+        async for chunk in response.aiter_bytes(chunk_size=CHUNK_SIZE):
+            if chunk:
+                buffer.write(chunk)
+        
+        buffer.seek(0)
+        return buffer.name, buffer.read()
+        
+
+@cl.on_chat_start
+async def start():
+    await cl.Message(
+        content="Welcome to the Chainlit audio example. Press `P` to talk!"
+    ).send()
+
+
+@cl.on_audio_chunk
+async def on_audio_chunk(chunk: cl.AudioChunk):
+    if chunk.isStart:
+        buffer = BytesIO()
+        # This is required for whisper to recognize the file type
+        buffer.name = f"input_audio.{chunk.mimeType.split('/')[1]}"
+        # Initialize the session for a new audio stream
+        cl.user_session.set("audio_buffer", buffer)
+        cl.user_session.set("audio_mime_type", chunk.mimeType)
+
+    # TODO: Use Gladia to transcribe chunks as they arrive would decrease latency
+    # see https://docs-v1.gladia.io/reference/live-audio
+    
+    # For now, write the chunks to a buffer and transcribe the whole audio at the end
+    cl.user_session.get("audio_buffer").write(chunk.data)
+
+
+@cl.on_audio_end
+async def on_audio_end(elements: list[ElementBased]):
+    # Get the audio buffer from the session
+    audio_buffer: BytesIO = cl.user_session.get("audio_buffer")
+    audio_buffer.seek(0)  # Move the file pointer to the beginning
+    audio_file = audio_buffer.read()
+    audio_mime_type: str = cl.user_session.get("audio_mime_type")
+
+    input_audio_el = cl.Audio(
+        mime=audio_mime_type, content=audio_file, name=audio_buffer.name
+    )
+    await cl.Message(
+        author="You", 
+        type="user_message",
+        content="",
+        elements=[input_audio_el, *elements]
+    ).send()
+    
+    
+    whisper_input = (audio_buffer.name, audio_file, audio_mime_type)
+    transcription = await speech_to_text(whisper_input)
+
+    images = [file for file in elements if "image" in file.mime]
+
+    text_answer = await generate_text_answer(transcription, images)
+    
+    output_name, output_audio = await text_to_speech(text_answer, audio_mime_type)
+    
+    output_audio_el = cl.Audio(
+        name=output_name,
+        auto_play=True,
+        mime=audio_mime_type,
+        content=output_audio,
+    )
+    answer_message = await cl.Message(content="").send()
+
+    answer_message.elements = [output_audio_el]
+    await answer_message.update()
+
