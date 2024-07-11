@@ -1,0 +1,11 @@
+1. add arabic
+2. add text in the interface with audios
+3. add response to text also
+4. remove the image response
+5. turn the pdf into a json format
+6. WRITE PROMPTS
+7. test the application
+8. deploy through hugging face replit or discord.
+9. add google auth also.
+10. send the demo to client
+11. finally send link to client.
