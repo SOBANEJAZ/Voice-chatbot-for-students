@@ -1,14 +1,39 @@
-# Welcome to Chainlit! 🚀🤖
+# Aria: Your Study Buddy! 🤖📚
+## What's Aria? 🤔
 
-Hi there, Developer! 👋 We're excited to have you on board. Chainlit is a powerful tool designed to help you prototype, debug and share applications built on top of LLMs.
+A friendly voice chatbot 🗣️  
 
-## Useful Links 🔗
+Helps you with your studies 📝  
 
-- **Documentation:** Get started with our comprehensive [Chainlit Documentation](https://docs.chainlit.io) 📚
-- **Discord Community:** Join our friendly [Chainlit Discord](https://discord.gg/k73SQ3FyUh) to ask questions, share your projects, and connect with other developers! 💬
+Like having a smart friend always ready to help! 🧠💡
 
-We can't wait to see what you create with Chainlit! Happy coding! 💻😊
+## How to Use Aria 🎯
 
-## Welcome screen
+Say "Hi Aria!" to start 👋  
 
-To modify the welcome screen, edit the `chainlit.md` file at the root of your project. If you do not want a welcome screen, just leave this file empty.
+Tell Aria which day of your course you're on 📅  
+
+Ask questions about your studies 🙋‍♀️  
+
+Aria will help you learn and understand 🌟
+
+## Why Aria is Cool 😎
+
+Always there when you need help 🆘  
+
+Makes studying fun 🎉  
+
+Knows lots of things 🧠  
+
+Never gets tired of your questions ❓❓❓
+
+## Remember 🚀
+
+Be polite to Aria 😊  
+
+Have fun while learning 🎈  
+
+Keep asking questions 🔍  
+
+
+# Happy studying with Aria! 🎓🎊
