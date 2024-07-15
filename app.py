@@ -1,7 +1,9 @@
 from chainlit.element import ElementBased
-from openai import AsyncOpenAI
-from io import BytesIO
 import chainlit as cl
+
+from openai import AsyncOpenAI
+
+from io import BytesIO
 import httpx
 import os
 
